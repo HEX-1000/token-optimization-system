@@ -1,0 +1,100 @@
+name: Report a result
+description: Tell us how the server behaved on your files, with numbers and a general description.
+title: "[result] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This form collects what happened, not what is in your files.
+
+        **Do not paste** document text, file names, folder paths, or your actual questions. Describe them in general terms, for example "a question about one setting that is explained in a single section of a Markdown file". Issues on this repository are public.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Ask Claude to call `optimizer_stats`; it reports the version. The current release is 0.25.2.
+      placeholder: "0.25.2"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What happened
+      options:
+        - A relevant section was not returned
+        - An irrelevant section was returned
+        - Nothing was returned when something should have been
+        - Too much text was returned
+        - Token use went down (measured)
+        - Token use did not go down (measured)
+        - Install or setup problem
+        - Something else
+    validations:
+      required: true
+
+  - type: input
+    id: corpus_size
+    attributes:
+      label: How many files did you index?
+      description: A rough number is enough.
+      placeholder: "about 120 files"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: file_types
+    attributes:
+      label: File types in the index
+      options:
+        - label: Markdown (.md)
+        - label: Word (.docx)
+        - label: PowerPoint (.pptx)
+        - label: Excel (.xlsx)
+        - label: PDF
+        - label: Other text files (.txt, .json, .py and so on)
+
+  - type: dropdown
+    id: language
+    attributes:
+      label: Language of the documents and questions
+      description: Search matches only the letters a to z and digits for now (see Limitations in the README).
+      options:
+        - English
+        - Mostly English with some other language
+        - Another language
+    validations:
+      required: true
+
+  - type: textarea
+    id: numbers
+    attributes:
+      label: Numbers, if you measured anything
+      description: Tokens returned by the server, tokens Claude used for the same question without it, and how you counted them. Leave empty if you did not measure.
+      placeholder: |
+        With the server: about 1,600 tokens.
+        Without: about 20,000 tokens (Claude opened 3 files).
+        Counted from: the token counter in Claude Desktop.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What you asked, what you expected, what you got
+      description: In general terms, without quoting your files or questions.
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Windows and Python versions
+      placeholder: "Windows 11 23H2, Python 3.12 from python.org"
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Before you submit
+      options:
+        - label: This issue contains no document text, file names, folder paths, or my actual questions.
+          required: true
