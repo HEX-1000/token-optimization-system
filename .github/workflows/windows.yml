@@ -1,0 +1,226 @@
+name: windows
+
+# Runs the README install path on a clean Windows machine, with Windows PowerShell 5.1
+# (shell: powershell), and every path inside the runner's temp folder.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Windows PowerShell 5.1, Python ${{ matrix.python }}, install.ps1 ${{ matrix.install }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # "-Python": the README option for choosing the interpreter; the environment must use exactly that version.
+        # "no option": the README step 3 command as written; install.ps1 picks the Python itself
+        # (the py launcher first), which on the runner image is not necessarily the one setup-python installed.
+        include:
+          - python: "3.10"
+            install: "-Python"
+          - python: "3.12"
+            install: "-Python"
+          - python: "3.12"
+            install: "no option"
+    env:
+      WANT_PYTHON: ${{ matrix.python }}
+      INSTALL_MODE: ${{ matrix.install }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Hygiene tests
+        shell: powershell
+        run: |
+          python -B -m unittest discover -s tests -v
+          if ($LASTEXITCODE -ne 0) { throw "hygiene tests failed" }
+
+      - name: Prepare
+        shell: powershell
+        run: |
+          # Test paths contain a space on purpose: Windows user names often do.
+          $work = Join-Path $env:RUNNER_TEMP "tos smoke"
+          New-Item -ItemType Directory -Force -Path $work | Out-Null
+          Write-Host "PowerShell $($PSVersionTable.PSVersion)"
+          if ($PSVersionTable.PSVersion.Major -ne 5) { throw "expected Windows PowerShell 5.x" }
+          Write-Host "python on PATH: $((Get-Command python).Source)"
+          $helpers = @'
+          $ErrorActionPreference = "Continue"
+          $work = Join-Path $env:RUNNER_TEMP "tos smoke"
+          $install = Join-Path $work "install dir"
+          $venvPy = Join-Path $install ".venv\Scripts\python.exe"
+
+          function Fail([string]$title, [string]$detail) {
+              $d = "$detail".Replace("%", "%25").Replace("`r", "").Replace("`n", "%0A")
+              Write-Host "::error title=$title::$d"
+              throw $title
+          }
+
+          # Runs one of the repository's scripts the way the README does, in a new Windows PowerShell process.
+          function Invoke-Script([string[]]$ScriptArgs) {
+              $lines = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File @ScriptArgs 2>&1 | ForEach-Object { "$_" }
+              $code = $LASTEXITCODE
+              $lines | ForEach-Object { Write-Host $_ }
+              return [pscustomobject]@{ Code = $code; Text = ($lines -join "`n") }
+          }
+
+          function Invoke-Python([string[]]$PyArgs) {
+              $lines = & $venvPy -B @PyArgs 2>&1 | ForEach-Object { "$_" }
+              $code = $LASTEXITCODE
+              return [pscustomobject]@{ Code = $code; Text = ($lines -join "`n") }
+          }
+
+          # Arguments of the README step 3 command, plus -Python when this leg tests that option.
+          function Get-InstallArgs {
+              $a = @("scripts\install.ps1", "-InstallDir", $install)
+              if ($env:INSTALL_MODE -eq "-Python") { $a += @("-Python", (Get-Command python).Source) }
+              return $a
+          }
+
+          # Prints "<files> <chunks>" from the installed index.
+          function Get-IndexCounts {
+              $script = Join-Path $work "counts.py"
+              Set-Content -Path $script -Encoding Ascii -Value @(
+                  "import pathlib, sqlite3, sys",
+                  "con = sqlite3.connect(str(pathlib.Path(sys.argv[1]) / 'data' / 'optimizer.db'))",
+                  "print(con.execute('select count(*) from files').fetchone()[0], con.execute('select count(*) from chunks').fetchone()[0])"
+              )
+              $r = Invoke-Python @($script, $install)
+              if ($r.Code -ne 0) { Fail "index counts" $r.Text }
+              return $r.Text.Trim()
+          }
+
+          function Get-Stats {
+              $script = Join-Path $work "stats.py"
+              Set-Content -Path $script -Encoding Ascii -Value @(
+                  "import sys",
+                  "sys.path.insert(0, sys.argv[1])",
+                  "import server_d2",
+                  "print(server_d2.optimizer_stats())"
+              )
+              $r = Invoke-Python @($script, $install)
+              if ($r.Code -ne 0) { Fail "optimizer_stats" $r.Text }
+              return $r.Text
+          }
+
+          function Get-ChangelogVersion {
+              $m = Select-String -Path "CHANGELOG.md" -Pattern '^##\s+v?(\d+\.\d+\.\d+)' | Select-Object -First 1
+              if (-not $m) { Fail "changelog" "CHANGELOG.md has no version heading" }
+              return $m.Matches[0].Groups[1].Value
+          }
+          '@
+          Set-Content -Path (Join-Path $work "helpers.ps1") -Encoding Ascii -Value $helpers
+
+      - name: "README step 3: install.ps1"
+        shell: powershell
+        run: |
+          . (Join-Path $env:RUNNER_TEMP "tos smoke\helpers.ps1")
+          $r = Invoke-Script @(Get-InstallArgs)
+          if ($r.Code -ne 0) { Fail "install.ps1 exit code $($r.Code)" $r.Text }
+          if ($r.Text -notmatch "Installed\. Next steps:") { Fail "install.ps1 output" $r.Text }
+          $py = Invoke-Python @("-c", "import sys; print('%d.%d' % sys.version_info[:2])")
+          Write-Host "private environment runs Python $($py.Text)"
+          if ($env:INSTALL_MODE -eq "-Python" -and $py.Text.Trim() -ne $env:WANT_PYTHON) {
+              Fail "python version" "install.ps1 built its environment with Python $($py.Text.Trim()), the matrix asked for $env:WANT_PYTHON"
+          }
+          foreach ($f in "server.py", "server_d2.py", "indexer.py", "db.py") {
+              if (-not (Test-Path (Join-Path $install $f))) { Fail "missing file" $f }
+          }
+
+      - name: "README step 4: index.ps1 on three Markdown files"
+        shell: powershell
+        run: |
+          . (Join-Path $env:RUNNER_TEMP "tos smoke\helpers.ps1")
+          $docs = Join-Path $work "docs"
+          New-Item -ItemType Directory -Force -Path $docs | Out-Null
+          Set-Content -Path (Join-Path $docs "alpha.md") -Encoding Ascii -Value @("# Alpha", "", "The copper valve in the pump room leaks at 40 psi.")
+          Set-Content -Path (Join-Path $docs "beta.md") -Encoding Ascii -Value @("# Beta", "", "## Schedule", "", "The board meets on the second Tuesday of each month.", "", "## Budget", "", "The water coop budget is approved in March.")
+          Set-Content -Path (Join-Path $docs "gamma.md") -Encoding Ascii -Value @("# Gamma", "", "Meter readings are collected by volunteers.")
+          $r = Invoke-Script @("scripts\index.ps1", "-Folder", $docs, "-InstallDir", $install)
+          if ($r.Code -ne 0) { Fail "index.ps1 exit code $($r.Code)" $r.Text }
+          if ($r.Text -notmatch "Failed files: 0") { Fail "index.ps1 reported failures" $r.Text }
+          if ($r.Text -notmatch "New files: 3") { Fail "index.ps1 did not index 3 files" $r.Text }
+          $counts = Get-IndexCounts
+          Write-Host "index rows (files chunks): $counts"
+          Set-Content -Path (Join-Path $work "counts_after_index.txt") -Encoding Ascii -Value $counts
+
+      - name: "README step 7: optimizer_stats from the installed server"
+        shell: powershell
+        run: |
+          . (Join-Path $env:RUNNER_TEMP "tos smoke\helpers.ps1")
+          $version = Get-ChangelogVersion
+          $stats = Get-Stats
+          Write-Host $stats
+          if ($stats -notmatch [regex]::Escape("Token Optimization System v$version")) { Fail "stats version" "expected v$version in: $stats" }
+          if ($stats -notmatch "Indexed files: 3") { Fail "stats file count" $stats }
+
+      - name: "README step 6: connect-claude-desktop.ps1 and -Undo"
+        shell: powershell
+        run: |
+          . (Join-Path $env:RUNNER_TEMP "tos smoke\helpers.ps1")
+          $cfg = Join-Path $work "claude_desktop_config.json"
+          $original = '{"theme":"dark","mcpServers":{"other-server":{"command":"node","args":["one.js"],"env":{}}},"extra":{"list":[1,2,3],"single":["x"],"none":[],"text":"a <b> & c"}}'
+          Set-Content -Path $cfg -Encoding Ascii -Value $original
+          # Windows PowerShell 5.1 drops the double quotes of an argument passed to a native program, so the
+          # checker reads the original from a file.
+          $originalFile = Join-Path $work "original_config.json"
+          Set-Content -Path $originalFile -Encoding Ascii -Value $original
+
+          $checkScript = Join-Path $work "check_config.py"
+          Set-Content -Path $checkScript -Encoding Ascii -Value @(
+              "import json, sys",
+              "cfg, original_file, want_entry, venv_py = sys.argv[1:5]",
+              "now = json.load(open(cfg, encoding='utf-8'))",
+              "before = json.load(open(original_file, encoding='utf-8'))",
+              "name = 'token-optimization-system'",
+              "servers = now.get('mcpServers', {})",
+              "if want_entry == 'yes':",
+              "    entry = servers.pop(name, None)",
+              "    assert entry is not None, 'entry was not written'",
+              "    assert entry['command'] == venv_py, entry['command']",
+              "    assert entry['args'][0] == '-B' and entry['args'][1].endswith('server_d2.py'), entry['args']",
+              "else:",
+              "    assert name not in servers, 'entry is still there'",
+              "assert now == before, 'other keys changed: ' + json.dumps(now)",
+              "print('config ok, entry present: ' + want_entry)"
+          )
+
+          $r = Invoke-Script @("scripts\connect-claude-desktop.ps1", "-Config", $cfg, "-InstallDir", $install)
+          if ($r.Code -ne 0) { Fail "connect exit code $($r.Code)" $r.Text }
+          if ($r.Text -notmatch "Config checked:") { Fail "connect output" $r.Text }
+          $c = Invoke-Python @($checkScript, $cfg, $originalFile, "yes", $venvPy)
+          Write-Host $c.Text
+          if ($c.Code -ne 0) { Fail "config after connect" "$($c.Text)`n$(Get-Content -Raw $cfg)" }
+
+          $u = Invoke-Script @("scripts\connect-claude-desktop.ps1", "-Undo", "-Config", $cfg, "-InstallDir", $install)
+          if ($u.Code -ne 0) { Fail "undo exit code $($u.Code)" $u.Text }
+          $c = Invoke-Python @($checkScript, $cfg, $originalFile, "no", $venvPy)
+          Write-Host $c.Text
+          if ($c.Code -ne 0) { Fail "config after undo" "$($c.Text)`n$(Get-Content -Raw $cfg)" }
+          Write-Host "::notice title=connect-claude-desktop.ps1::entry written, other keys kept, then removed by -Undo"
+
+      - name: "Run install.ps1 again: the index is kept"
+        shell: powershell
+        run: |
+          . (Join-Path $env:RUNNER_TEMP "tos smoke\helpers.ps1")
+          $before = (Get-Content (Join-Path $work "counts_after_index.txt") -Raw).Trim()
+          $r = Invoke-Script @(Get-InstallArgs)
+          if ($r.Code -ne 0) { Fail "second install.ps1 exit code $($r.Code)" $r.Text }
+          $after = Get-IndexCounts
+          Write-Host "index rows before: $before, after: $after"
+          if ($after -ne $before) { Fail "index changed" "before: $before, after: $after" }
+          $stats = Get-Stats
+          if ($stats -notmatch "Indexed files: 3") { Fail "stats after second install" $stats }
+          $py = (Invoke-Python @("-c", "import sys; print(sys.version.split()[0])")).Text.Trim()
+          $first = ($stats -split "`n")[0].Trim()
+          Write-Host "::notice title=install and index::Python $py, $first, index rows (files chunks) $before before and $after after the second install"
