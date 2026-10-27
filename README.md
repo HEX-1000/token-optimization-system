@@ -17,7 +17,18 @@ Everything runs on your machine. The index is one SQLite file in the install fol
 
 You ask Claude: *"What acceptance criteria did we set for the chunking experiment?"*
 
-Claude calls `optimizer_context` with the question. The server returns two sections, about 1,500 tokens, each under a short file label. Without the server, Claude would open the records one by one: about 80,000 tokens for the same answer. That is one measured case on this project's own notes, not a benchmark.
+Claude calls `optimizer_context` with the question. The server returns two sections, about 1,500 tokens, each under a short file label, instead of whole files. How much that saves depends on how Claude would otherwise find the answer; see the measured result below.
+
+## Measured result
+
+One controlled test so far, run in Claude Code (not in Claude Desktop). It asked 20 questions about this project's own 39 Markdown notes and compared three setups: no server, the server available, and the server available with a one-line instruction to use it. Each question was answered once per setup, and Claude Code's own cost estimate was compared question by question. The rule for the verdict was written before the first run.
+
+- With the server and the instruction, the estimated cost of the answers was 41% lower in total (0.24 against 0.41 dollars for the 20 questions). It was lower in 17 of the 19 questions that both setups answered correctly, and the median question cost 47% less.
+- The median run put 31% fewer tokens into the context (about 11,000 against 16,000).
+- Answers were correct in 19 of 20 runs with the server and in 20 of 20 without it. The one miss was a wording mismatch in the automatic check, not a missing section.
+- Without the instruction, Claude still called the server in 18 of 20 runs.
+
+What this does not show: the notes are 39 small files and the questions were written from them, so their wording overlaps closely with the text, which suits keyword search. Without the server, Claude Code searched with grep and read parts of files, which is a cheap baseline on small files. Results on large documents, in other clients or with your own questions can differ, in either direction. The raw data is not published.
 
 ## Tools Claude gets
 
@@ -26,7 +37,7 @@ Claude calls `optimizer_context` with the question. The server returns two secti
 | `optimizer_context` | The main tool. Returns the most relevant sections for a question, at most `max_chunks` (default 2), in a compact format. Returns nothing when nothing matches well. |
 | `optimizer_search` | Lists the best-matching sections with their file and heading. |
 | `optimizer_read` | Returns one indexed section, chosen by file and heading. |
-| `optimizer_stats` | Shows what is indexed and how many tokens were delivered compared with the full files. |
+| `optimizer_stats` | Shows what is indexed and how many tokens were delivered compared with the full files. The percentage it prints is a local estimate of what whole files would have cost. It is not what Claude spends without the server (in the test above, Claude Code searched and read parts of files), so it is higher than the saving measured there. |
 
 Supported files: Markdown, Word (.docx), PDF, PowerPoint (.pptx), Excel (.xlsx), plain text, CSV, JSON, YAML, HTML, CSS, Python, JavaScript and TypeScript. Markdown and Word files are split by heading, PDFs by page, presentations by slide and spreadsheets by sheet.
 
@@ -90,6 +101,10 @@ It makes a backup of Claude Desktop's config file, adds one entry named `token-o
 
 Run step 4 again after files change. Only new or changed files are read again. Add `-Rebuild` to index a folder from scratch.
 
+### Update
+
+Download the new version (or run `git pull` if you cloned it), quit Claude Desktop from the tray icon so the old server stops, and run step 3 again. The program files are replaced and your index is kept. Then start Claude Desktop; the first line of the `optimizer_stats` answer shows the version, and [CHANGELOG.md](CHANGELOG.md) lists what changed. Nothing checks for updates for you, because the server makes no network connections.
+
 ### Uninstall
 
 1. Quit Claude Desktop and run `powershell -ExecutionPolicy Bypass -File scripts\connect-claude-desktop.ps1 -Undo`.
@@ -104,6 +119,7 @@ Run step 4 again after files change. Only new or changed files are read again. A
 | `Claude Desktop is still running` | Quit it from the tray icon, not just the window. |
 | `Several config files were found` | Run step 6 again with `-Config "<path>"`, using the most recently modified file from the list. |
 | `Claude Desktop config not found` | In Claude Desktop open **Settings > Developer > Edit Config** once, quit Claude Desktop, and repeat step 6. |
+| A tool answers with `no such table` | Nothing is indexed yet. Run step 4, then ask again. |
 | The server shows as failed in Claude Desktop | Python from the Microsoft Store sometimes fails when another app starts it. Install Python from python.org and repeat step 3 with `-Python "<path to python.exe>"`. |
 
 ## Limitations
