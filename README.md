@@ -142,7 +142,7 @@ The long-term plan is a privacy-safe way to learn from many installations. Users
 
 Current: **0.25.2**, retrieval V0.25.0 with compact output. See [CHANGELOG.md](CHANGELOG.md).
 
-Development and experiments happen in a separate repository. Changes reach this one after they are measured on the evaluation suite. Bug reports and questions are welcome as [issues](../../issues).
+Development and experiments happen in a separate repository. Changes reach this one after they are measured on the evaluation suite. Bug reports and questions are welcome as [issues](../../issues). If you tried the server on your own files, the "Report a result" form asks for numbers and a general description. It never asks for document text, file names or your questions.
 
 ## License
 
