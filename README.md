@@ -30,6 +30,8 @@ One controlled test so far, run in Claude Code (not in Claude Desktop). It asked
 
 What this does not show: the notes are 39 small files and the questions were written from them, so their wording overlaps closely with the text, which suits keyword search. Without the server, Claude Code searched with grep and read parts of files, which is a cheap baseline on small files. Results on large documents, in other clients or with your own questions can differ, in either direction. The raw data is not published.
 
+After the test, in two weeks of real work in this project's folder (2026-10-28 to 2026-11-10), Claude Code did not call the server on its own in any of 21 sessions; in normal sessions Claude Code shows MCP tools by name only until it searches for them, while the test runs had the tool descriptions loaded from the start.
+
 ## Tools Claude gets
 
 | Tool | What it does |
