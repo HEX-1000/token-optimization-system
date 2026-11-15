@@ -162,10 +162,6 @@ Current: **0.25.2**, retrieval V0.25.0 with compact output. See [CHANGELOG.md](C
 
 Development and experiments happen in a separate repository. Changes reach this one after they are measured on the evaluation suite. Bug reports are welcome as [issues](../../issues), questions and ideas in [Discussions](../../discussions). Both are public, so do not paste document text, file names or folder paths there. If you tried the server on your own files, the "Report a result" form asks for numbers and a general description. It never asks for document text, file names or your questions.
 
-## Support
-
-Token Optimization System is free and has no paid features. If it is useful to you and you want to support the work, you can do it through [Buy Me a Coffee](https://buymeacoffee.com/hex.1000). The Sponsor button at the top of the repository page opens the same link.
-
 ## License
 
 [MIT](LICENSE). Made by [HEX-1000](https://github.com/HEX-1000).
