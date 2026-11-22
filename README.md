@@ -52,6 +52,8 @@ By source: tokens by category (main and subagent sessions)
 
 After that come the compartments (the sources grouped, for example into agentic work and chat text), the cost by model, the cost by token kind, the median of the largest context per session, and checks (calls without a price, share of context no source accounts for).
 
+The thinking table lists, for each model, the thinking tokens written as output, the cost of re-reading them in later calls ("later context"), and the total of the two. Use the total: on the author's machine thinking is 30.8% of the weighted cost, while the output column alone is 18.4%. Another table shows the effort levels found in the logs with calls and thinking tokens per call. Both name the most a lower level could remove, not a saving.
+
 If no log is found, it prints one line and exits with code 1:
 
 ```text
@@ -238,7 +240,7 @@ The first part of that is in the code: a loop that switches one Claude Code sett
 
 ## Versions
 
-Current: **0.26.0**, which adds the measurement report (`python -m hive report`). The retrieval server is 0.25.2 (retrieval V0.25.0 with compact output) and has not changed. See [CHANGELOG.md](CHANGELOG.md).
+Current: **0.26.1**, which adds thinking and effort levels to the measurement report (`python -m hive report`). The retrieval server is 0.25.2 (retrieval V0.25.0 with compact output) and has not changed. See [CHANGELOG.md](CHANGELOG.md).
 
 Development and experiments happen in a separate repository. Changes reach this one after they are measured on the evaluation suite. Bug reports are welcome as [issues](../../issues), questions and ideas in [Discussions](../../discussions). Both are public, so do not paste document text, file names or folder paths there. If you tried the server on your own files, the "Report a result" form asks for numbers and a general description. It never asks for document text, file names or your questions.
 

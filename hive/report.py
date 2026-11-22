@@ -14,6 +14,14 @@ table per project, and says so in its first line. There is no table per day and 
 
 Prices come from the weights file WEIGHTS (api-v2: api-v1's five models and the other models of the
 pricing page). weights.DEFAULT and the module-wide prices of breakdown are restored after a run.
+
+The thinking and effort tables (step 13 of the dev repo's plan): thinking tokens come from the loader's calls;
+the effort level does not, because breakdown.py does not read it, so call_fields reads each file's records a
+second time. The thinking table splits the source table's thinking row by the model that produced each block:
+the output, then the same blocks in the context of later calls (one cache write, then reads until the next
+compaction). Its total is named as the most a lower level can remove at unchanged calls, never as a saving;
+Checks counts the thinking drops inside a context, where the later context is too high. A log without the level or without a thinking token count works; such calls are counted under
+"not logged" and under Checks. A level not on the list LEVELS is printed as "other level" without --names.
 Standard library only.
 """
 import re
@@ -60,6 +68,9 @@ CAT_ORDER = ["prefix", "injected", "prompt", "compaction summary", "thinking", "
              "tool input", "tool result", "image", "cache rebuild", "residual"]
 KINDS = ("uncached input", "5-minute cache writes", "1-hour cache writes", "cache reads", "output")
 MODEL_ID = re.compile(r"^(?:[a-z]{2,4}\.)?(?:anthropic\.)?claude-[a-z0-9.-]{1,60}(?:@\d{8})?(?::\d{1,3})?$")
+LEVELS = ("low", "medium", "high", "xhigh", "max")      # Claude Code's effort levels, lowest first
+NOT_LOGGED = "not logged"
+OTHER_LEVEL = "other level"
 
 
 def candidate_dirs():
@@ -99,11 +110,96 @@ def show_model(model, names=False):
     return model if names or MODEL_ID.match(model) else OTHER_MODEL
 
 
+def show_level(level, names=False):
+    if level is None:
+        return NOT_LOGGED
+    if level in LEVELS:
+        return level
+    return str(level) if names else OTHER_LEVEL
+
+
 def call_cost(call):
     """(tokens by kind, weighted cost by kind or None when the model has no price) of one call."""
     split = tb.call_split(call)
     rates = tb.call_rates(call)
     return split, (None if rates is None else [t * r for t, r in zip(split, rates)])
+
+
+def call_fields(path):
+    """Message id -> [effort level or None, True when the usage has a thinking token count], for one file.
+
+    Records are taken as breakdown.parse_file takes them: a record with a string uuid not seen before in the
+    file, synthetic messages left out, the message id or else the uuid as the key. The level is the record's
+    effort, else its perTurnEffort (the two were equal wherever both were logged up to 2026-11-22); the first
+    record of a message that has a level gives it."""
+    out, seen = {}, set()
+    for obj in tb.read_records(path):
+        if obj is None or obj.get("type") not in ("user", "assistant", "attachment", "system"):
+            continue
+        uuid = obj.get("uuid")
+        if not isinstance(uuid, str) or uuid in seen:
+            continue
+        seen.add(uuid)
+        msg = obj.get("message")
+        if obj["type"] != "assistant" or not isinstance(msg, dict) or msg.get("model") == "<synthetic>":
+            continue
+        f = out.setdefault(msg.get("id") or uuid, [None, False])
+        level = obj.get("effort")
+        if level is None:
+            level = obj.get("perTurnEffort")
+        if f[0] is None:
+            f[0] = level
+        usage = msg.get("usage")
+        det = usage.get("output_tokens_details") if isinstance(usage, dict) else None
+        if isinstance(det, dict) and isinstance(det.get("thinking_tokens"), int):
+            f[1] = True
+    return out
+
+
+def thinking_summary(sessions, names=False):
+    """(by model, by model and level, calls without a thinking token count, thinking drops inside a context).
+
+    By model: shown id -> [calls, thinking tokens, output, total, weights entries]; by level: (shown id,
+    shown level) -> [calls, thinking tokens]. Calls, thinking tokens and output are over the counted calls:
+    a call's thinking is its thinking tokens, at most its output tokens (as breakdown.size_outputs sizes the
+    thinking item), and output is that at the output price of its model. Total is the weighted value of the
+    thinking items (breakdown's it.w: the output, then the same block in the context of the later counted
+    calls) by the model of the call that produced each item, so the totals add up to the thinking row of
+    the source table. A thinking drop inside a context is a thinking_drop or thinking_stripped event
+    whose next call does not start a context."""
+    models = defaultdict(lambda: [0, 0, 0.0, 0.0, set()])
+    levels = defaultdict(lambda: [0, 0])
+    no_count = drops = 0
+    for s in sessions:
+        fields = call_fields(s.path)
+        calls = s.fd.calls
+        for c in calls:
+            if not c.counted:
+                continue
+            level, has_count = fields.get(c.mid, (None, False))
+            think = min(c.u["think"], c.u["out"])
+            rates = tb.call_rates(c)
+            name = show_model(c.model, names)
+            m = models[name]
+            m[0] += 1
+            m[1] += think
+            m[4].add(price_key(c.model))
+            if rates is not None:
+                m[2] += think * rates[4]
+            row = levels[(name, show_level(level, names))]
+            row[0] += 1
+            row[1] += think
+            no_count += 0 if has_count else 1
+        for it in s.fd.items:
+            if it.cat == "thinking":
+                model = calls[it.out_call].model
+                m = models[show_model(model, names)]
+                m[3] += it.w
+                m[4].add(price_key(model))
+        steps = s.an.steps
+        drops += sum(1 for pos, *_rest in s.fd.thinking_events
+                     if pos < len(steps) and steps[pos].kind not in tb.FIRST_LIKE)
+    return dict(models), dict(levels), no_count, drops
 
 
 def summarize(sessions, names=False):
@@ -132,7 +228,8 @@ def summarize(sessions, names=False):
             for i, w in enumerate(cost):
                 kinds[i][1] += w
     d["models"], d["kinds"], d["unpriced"] = dict(models), kinds, unpriced
-    tops = [max((c.context for c in s.fd.calls if c.counted), default=0) for s in sessions
+    d["thinking"], d["levels"], d["no_think_count"], d["thinking_drops"] = thinking_summary(sessions, names)
+    tops =[max((c.context for c in s.fd.calls if c.counted), default=0) for s in sessions
             if s.kind == "main" and s.calls]
     d["max_context_median"] = statistics.median(tops) if tops else None
     d["main_with_calls"] = len(tops)
@@ -214,11 +311,17 @@ def compartment_table(rows):
     return out
 
 
+def model_order(models):
+    """Shown model ids by weighted cost, then calls, then name (the order of every table by model)."""
+    return sorted(models, key=lambda n: (-models[n][1], -models[n][0], n))
+
+
 def model_table(models):
     w_total = sum(v[1] for v in models.values())
     out = ["By model (counted calls; the weights entry is the price row used)",
            "  {:<40}{:>10}{:>12}{:>7}   {}".format("model", "calls", "weighted", "w %", "weights entry")]
-    for name, (calls, w, keys) in sorted(models.items(), key=lambda kv: (-kv[1][1], -kv[1][0], kv[0])):
+    for name in model_order(models):
+        calls, w, keys = models[name]
         priced = any(k is not None for k in keys)
         entries = sorted(k for k in keys if k is not None) + (["no price"] if None in keys else [])
         out.append("  {:<40}{:>10,}{:>12}{:>7}   {}".format(
@@ -235,6 +338,55 @@ def kind_table(kinds):
     for name, (t, w) in zip(KINDS, kinds):
         out.append("  {:<26}{:>18}{:>12}{:>7}".format(name, fmt_n(t), fmt_usd(w), pct(w, w_total).strip()))
     out.append("  {:<26}{:>18}{:>12}".format("TOTAL", fmt_n(sum(t for t, _w in kinds)), fmt_usd(w_total)))
+    return out
+
+
+def thinking_table(d):
+    w_total = sum(v[1] for v in d["models"].values())
+    rows = d["thinking"]
+    head = "  {:<40}{:>10}{:>18}{:>12}{:>15}{:>12}{:>10}{:>9}"
+    out = ["Thinking by model (counted calls; total = the thinking row of the source table)",
+           head.format("model", "calls", "thinking tokens", "output", "later context", "total", "of model",
+                       "of all")]
+    # a model that only produced thinking in calls repeated from an earlier file comes after the others
+    extra = sorted((n for n in rows if n not in d["models"]), key=lambda n: (-rows[n][3], n))
+    for name in model_order(d["models"]) + extra:
+        calls, tokens, output, total, keys = rows[name]
+        w = d["models"][name][1] if name in d["models"] else 0.0
+        priced = any(k is not None for k in keys)
+        out.append(head.format(name[:40], "{:,}".format(calls), fmt_n(tokens),
+                               *([fmt_usd(output), fmt_usd(total - output), fmt_usd(total), pct(total, w).strip(),
+                                  pct(total, w_total).strip()] if priced else ["-"] * 5)))
+    output, total = sum(v[2] for v in rows.values()), sum(v[3] for v in rows.values())
+    out.append(head.format("TOTAL", "{:,}".format(sum(v[0] for v in rows.values())),
+                           fmt_n(sum(v[1] for v in rows.values())), fmt_usd(output), fmt_usd(total - output),
+                           fmt_usd(total), "", pct(total, w_total).strip()))
+    out += ["  Output: thinking tokens at the output price. Later context: the same blocks in the calls after, one "
+            "cache write and then cache reads until the next compaction or the end of the session.",
+            "  The total is the most that a lower effort level can remove at unchanged calls: a thinking token that "
+            "is not produced is not written to the cache and not read again. It is not a saving: a lower level can "
+            "also change the answers and the number of prompts and calls, which this report does not measure.",
+            "  Later context is too high where earlier thinking left the context before a compaction: after a "
+            "thinking drop (Checks counts them) and on models whose earlier thinking the API removes."]
+    return out
+
+
+def level_rank(level):
+    if level in LEVELS:
+        return LEVELS.index(level)
+    return len(LEVELS) + (1 if level == NOT_LOGGED else 0)
+
+
+def level_table(d):
+    order = {name: i for i, name in enumerate(model_order(d["models"]))}
+    head = "  {:<40}{:<14}{:>10}{:>26}"
+    out = ["Effort levels in the logs (counted calls; the level Claude Code wrote into each call's record)",
+           head.format("model", "level", "calls", "thinking tokens per call")]
+    for (name, level), (calls, tokens) in sorted(
+            d["levels"].items(), key=lambda kv: (order.get(kv[0][0], len(order)), level_rank(kv[0][1]), kv[0])):
+        out.append(head.format(name[:40], level[:14], "{:,}".format(calls), fmt_n(tokens / calls)))
+    out.append("  The levels were not given to the calls at random: a level is chosen with the work, so the "
+               "difference between two levels describes these calls and is not the effect of a level.")
     return out
 
 
@@ -257,6 +409,10 @@ def check_lines(d):
     return ["Checks",
             "  Calls without a price: {:,}{}".format(n, " ({})".format(ids) if n else ""),
             "  Every weighted total above leaves out the calls without a price.",
+            "  Calls without a thinking token count in the log: {:,}; their thinking is counted as 0.".format(
+                d["no_think_count"]),
+            "  Thinking drops inside a context (thinking_drop or thinking_stripped events not at a call that "
+            "starts a context): {:,}".format(d["thinking_drops"]),
             "  Residual (context no source took): {:.2f}% of the summed context".format(100 * d["residual_share"])]
 
 
@@ -275,6 +431,8 @@ def render(d, since, today, days, names=False):
     out += [""] + compartment_table(d["rows"])
     out += [""] + model_table(d["models"])
     out += [""] + kind_table(d["kinds"])
+    out += [""] + thinking_table(d)
+    out += [""] + level_table(d)
     out += [""] + context_lines(d)
     out += [""] + check_lines(d)
     if names:

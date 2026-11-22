@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.26.1 (2026-11-22)
+
+- `python -m hive report` has a table of thinking by model: thinking tokens written as output, the cost of re-reading them in later calls, and the total of both with its share of all cost. On the author's machine the total is 30.8% of the weighted cost; the output alone is 18.4%.
+- New table: the effort levels found in the logs, with calls and thinking tokens per call by model. Logs without an effort field still work.
+- Both tables give the most a lower effort level could remove, not a saving.
+- Retrieval server: unchanged, still 0.25.2. The hive package stays 0.1.0.
+
 ## 0.26.0 (2026-11-22)
 
 - New: `python -m hive report` shows where the tokens of your Claude Code sessions went, by source, model and token kind. It reads Claude Code's session logs and writes nothing.

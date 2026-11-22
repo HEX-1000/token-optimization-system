@@ -54,6 +54,22 @@ def mcp_session(cwd, sid_text="", model=OPUS):
     return log
 
 
+def mark(log, uuids, **fields):
+    """Add top-level fields (effort, perTurnEffort) to the records with these uuids."""
+    for r in log.recs:
+        if r["uuid"] in uuids:
+            r.update(fields)
+
+
+def text(t):
+    return [{"type": "text", "text": t}]
+
+
+def section(out, title):
+    """The rows of a printed table below its column heads, split on spaces, up to the next empty line."""
+    return [ln.split() for ln in out.split("\n" + title)[1].split("\n\n")[0].splitlines()[2:]]
+
+
 class Base(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -84,6 +100,21 @@ class Base(unittest.TestCase):
         finally:
             breakdown.use_weights(weights.DEFAULT)
 
+    def assert_thinking_total_is_the_source_row(self):
+        """The thinking table's totals add up to the thinking row of the source table, computed and printed."""
+        _ss, d = self.data()
+        row = d["rows"][("thinking", "-")][3]
+        self.assertTrue(math.isclose(sum(v[3] for v in d["thinking"].values()), row, rel_tol=1e-9, abs_tol=1e-15))
+        for v in d["thinking"].values():
+            self.assertLessEqual(v[2], v[3] + 1e-15)                  # later context is never negative
+        out, code = self.cli()
+        self.assertEqual(code, 0)
+        total = next(r for r in section(out, "Thinking by model") if r[0] == "TOTAL")
+        self.assertEqual(total[5], report.fmt_usd(row))
+        source = next(ln.split() for ln in out.splitlines() if ln.split()[:1] == ["thinking"])
+        self.assertEqual(source[6], total[5])                         # the weighted column of the source table
+        return d, out
+
 
 class Totals(Base):
     def setUp(self):
@@ -96,9 +127,9 @@ class Totals(Base):
         mcp_session("D:\\Work\\Other", "abc", model=SONNET).write(self.root, folder="Q", name="s2")
         log = Log(start(3), "D:\\Work\\Old")
         u = log.user("go")
-        log.call("o1", [{"type": "text", "text": "hi"}], use(inp=1000, cw=2000, cr=500, out=100, cw1=500), u,
-                 model="claude-opus-4-8")
-        log.call("o2", [{"type": "text", "text": "x"}], use(inp=10, out=10), u, model="gateway-model-7")
+        log.call("o1", [{"type": "text", "text": "hi"}], use(inp=1000, cw=2000, cr=500, out=100, think=40, cw1=500),
+                 u, model="claude-opus-4-8")
+        log.call("o2", [{"type": "text", "text": "x"}], use(inp=10, out=10, think=4), u, model="gateway-model-7")
         log.write(self.root, folder="R", name="s3")
 
     def test_every_table_total_equals_the_loader_total(self):
@@ -141,11 +172,192 @@ class Totals(Base):
             self.assertIn("\n" + head, "\n" + text)
         self.assertNotIn(" per day", text)
 
+    def test_thinking_total_with_an_unpriced_model(self):
+        d, out = self.assert_thinking_total_is_the_source_row()
+        row = next(r for r in section(out, "Thinking by model") if r[:3] == report.OTHER_MODEL.split())
+        self.assertEqual(row[3:], ["1", "4", "-", "-", "-", "-", "-"])
+        self.assertEqual(d["thinking"][report.OTHER_MODEL][4], {None})
+
     def test_the_run_restores_the_default_weights(self):
         before = dict(breakdown.PRICES)
         self.cli()
         self.assertEqual(breakdown.WEIGHTS, weights.DEFAULT)
         self.assertEqual(breakdown.PRICES, before)
+
+
+class Thinking(Base):
+    """Opus 5.5: k1 (2 records, the level only on the second) xhigh, k2 perTurnEffort only xhigh, k3 medium,
+    k4 no level and no thinking count, plus chain3 without levels. Sonnet 5.5: j1 medium, j2 max with more
+    thinking than output. The Opus file is also copied into a later file, whose calls are not counted."""
+
+    def setUp(self):
+        super().setUp()
+        log = Log(start(2))
+        u = log.user("go")
+        k1 = log.call("k1", [{"type": "thinking", "thinking": ""}] + text("a"), use(cw=1000, out=300, think=200), u)
+        mark(log, k1[1:], effort="xhigh")
+        k2 = log.call("k2", text("b"), use(cr=1000, out=100, think=50), k1[-1])
+        mark(log, k2, perTurnEffort="xhigh")
+        k3 = log.call("k3", text("c"), use(cr=1050, out=40), k2[-1])
+        mark(log, k3, effort="medium", perTurnEffort="medium")
+        no_count = use(cr=1100, out=10)
+        del no_count["output_tokens_details"]
+        log.call("k4", text("d"), no_count, k3[-1])
+        log.write(self.root, folder="P", name="s1")
+        log.write(self.root, folder="P", name="s1-copy")
+        chain3(start=start(2, 12)).write(self.root, folder="P", name="s2")
+        log = Log(start(1))
+        u = log.user("go")
+        j1 = log.call("j1", text("e"), use(cw=500, out=500, think=400), u, model=SONNET)
+        mark(log, j1, effort="medium")
+        j2 = log.call("j2", text("f"), use(cr=500, out=100, think=150), j1[-1], model=SONNET)
+        mark(log, j2, effort="max")
+        log.write(self.root, folder="Q", name="s3")
+
+    def test_thinking_and_levels_by_hand(self):
+        _ss, d = self.data()
+        self.assertEqual(d["repeated"], 4)
+        calls, tokens, cost, total, keys = d["thinking"][OPUS]
+        self.assertEqual((calls, tokens, keys), (7, 250, {OPUS}))
+        self.assertTrue(math.isclose(cost, 250 * 20 / 1e6, rel_tol=1e-12))     # Opus 5.5 output: 20 per million
+        self.assertGreater(total, cost)                                         # k1's block is read by k3 and k4
+        calls, tokens, cost, total, keys = d["thinking"][SONNET]
+        self.assertEqual((calls, tokens, keys), (2, 500, {SONNET}))             # j2's 150 capped at its output
+        self.assertTrue(math.isclose(cost, 500 * 10 / 1e6, rel_tol=1e-12))
+        self.assertEqual(d["levels"], {(OPUS, "xhigh"): [2, 250], (OPUS, "medium"): [1, 0],
+                                       (OPUS, report.NOT_LOGGED): [4, 0], (SONNET, "medium"): [1, 400],
+                                       (SONNET, "max"): [1, 100]})
+        self.assertEqual(d["no_think_count"], 1)
+
+    def test_levels_add_up_to_the_counted_calls(self):
+        ss, d = self.data()
+        self.assertEqual(sum(v[0] for v in d["levels"].values()), d["calls"])
+        self.assertEqual(sum(v[0] for v in d["thinking"].values()), d["calls"])
+        think = sum(min(c.u["think"], c.u["out"]) for s in ss for c in s.fd.calls if c.counted)
+        self.assertEqual(sum(v[1] for v in d["levels"].values()), think)
+        self.assertEqual(sum(v[1] for v in d["thinking"].values()), think)
+        self.assertEqual({m for m, _l in d["levels"]}, set(d["models"]))
+
+    def test_printed_lines(self):
+        out, code = self.cli()
+        self.assertEqual(code, 0)
+        for head in ("Thinking by model", "Effort levels in the logs"):
+            self.assertIn("\n" + head, out)
+        self.assertLess(out.index("By token kind"), out.index("Thinking by model"))
+        self.assertLess(out.index("Effort levels in the logs"), out.index("\nContext"))
+        self.assertIn("\nThinking by model (counted calls; total = the thinking row of the source table)\n", out)
+        self.assertIn("It is not a saving", out)
+        self.assertIn("not written to the cache and not read again", out)
+        self.assertIn("after a thinking drop (Checks counts them)", out)
+        self.assertIn("is not the effect of a level", out)
+        self.assertIn("Calls without a thinking token count in the log: 1; their thinking is counted as 0.", out)
+        self.assertEqual(section(out, "Effort levels in the logs")[:-1], [         # Opus first: it costs more
+            [OPUS, "medium", "1", "0"], [OPUS, "xhigh", "2", "125"], [OPUS, "not", "logged", "4", "0"],
+            [SONNET, "medium", "1", "400"], [SONNET, "max", "1", "100"]])
+        rows = section(out, "Thinking by model")
+        d = self.data()[1]
+        _calls, _tokens, output, total, _keys = d["thinking"][OPUS]
+        share = "{:.1f}%".format(100.0 * total / d["models"][OPUS][1])
+        all_share = "{:.1f}%".format(100.0 * total / sum(v[1] for v in d["models"].values()))
+        self.assertEqual(rows[0], [OPUS, "7", "250", report.fmt_usd(output), report.fmt_usd(total - output),
+                                   report.fmt_usd(total), share, all_share])
+        self.assertEqual(rows[1][:3], [SONNET, "2", "500"])
+        self.assertEqual(rows[2][:3], ["TOTAL", "9", "750"])
+
+    def test_thinking_total_is_the_source_row(self):
+        self.assert_thinking_total_is_the_source_row()
+
+
+class LaterContext(Base):
+    """Opus 5.5, 1-hour writes. h1 (C 1,000) thinks 200 of its 300 output tokens; h2 (C 1,300) writes h1's
+    output; a thinking_drop event comes before h3 (C 1,350), which reads it; a compaction comes before h4,
+    which starts a new context without it. A second thinking_drop is at h4 and a thinking_stripped after
+    h4, the last call: neither is inside a context."""
+
+    def setUp(self):
+        super().setUp()
+        log = Log(start(1))
+        u = log.user("go")
+        h1 = log.call("h1", [{"type": "thinking", "thinking": ""}] + text("a"), use(cw=1000, out=300, think=200), u)
+        h2 = log.call("h2", text("b"), use(cr=1000, cw=300, out=50), h1[-1])
+        drop = {"type": "thinking_drop", "newlyDropped": {"blockCount": 1, "turnCount": 1}}
+        t = log.push({"type": "attachment", "parentUuid": h2[-1], "attachment": drop})
+        log.call("h3", text("c"), use(cr=1300, cw=50, out=10), t)
+        b = log.boundary()
+        s = log.user("summary", parent=b, isCompactSummary=True)
+        t = log.push({"type": "attachment", "parentUuid": s, "attachment": dict(drop)})
+        h4 = log.call("h4", text("d"), use(cw=500, out=5), t)
+        log.push({"type": "attachment", "parentUuid": h4[-1], "attachment": {"type": "thinking_stripped"}})
+        log.write(self.root, name="s1")
+
+    def test_later_context_by_hand(self):
+        _ss, d = self.data()
+        calls, tokens, output, total, _keys = d["thinking"][OPUS]
+        self.assertEqual((calls, tokens), (4, 200))
+        self.assertTrue(math.isclose(output, 200 * 20 / 1e6, rel_tol=1e-12))
+        # written once at h2 (8 per million), read once at h3 (0.20 per million), not in h4's context
+        self.assertTrue(math.isclose(total - output, 200 * (8 + 0.2) / 1e6, rel_tol=1e-12))
+        self.assert_thinking_total_is_the_source_row()
+
+    def test_only_the_drop_inside_a_context_is_counted(self):
+        ss, d = self.data()
+        self.assertEqual([e[:2] for e in ss[0].fd.thinking_events],
+                         [(2, "thinking_drop"), (3, "thinking_drop"), (4, "thinking_stripped")])
+        self.assertEqual(d["thinking_drops"], 1)
+        out, _code = self.cli()
+        self.assertIn("  Thinking drops inside a context (thinking_drop or thinking_stripped events not at a call "
+                      "that starts a context): 1\n", out)
+
+
+class NoLevel(Base):
+    def test_logs_without_levels_or_thinking_counts_work(self):
+        log = Log(start())
+        u = log.user("go")
+        p = u
+        for i in range(3):
+            usage = use(cw=1000 * (i == 0), cr=1000 * (i > 0), out=50)
+            del usage["output_tokens_details"]
+            p = log.call("n%d" % i, text("x"), usage, p)[-1]
+        log.write(self.root, name="s1")
+        out, code = self.cli()
+        self.assertEqual(code, 0)
+        _ss, d = self.data()
+        self.assertEqual(d["levels"], {(OPUS, report.NOT_LOGGED): [3, 0]})
+        self.assertEqual(d["thinking"][OPUS][:2], [3, 0])
+        self.assertIn("Calls without a thinking token count in the log: 3;", out)
+        self.assertIn("starts a context): 0\n", out)
+        self.assertIn("  {:<40}{:<14}".format(OPUS, report.NOT_LOGGED), out)
+
+    def test_show_level(self):
+        for level in report.LEVELS:
+            self.assertEqual(report.show_level(level), level)
+        self.assertEqual(report.show_level(None), report.NOT_LOGGED)
+        for level in ("turbo", "", 3, "XHIGH"):
+            self.assertEqual(report.show_level(level), report.OTHER_LEVEL)
+            self.assertEqual(report.show_level(level, names=True), str(level))
+
+    def test_call_fields_follows_the_loader(self):
+        log = Log(start())
+        u = log.user("go")
+        bare = {"output_tokens": 5}
+        a = log.call("m1", text("x"), bare, u)                                      # no level, no thinking count
+
+        def m1(**extra):
+            return {"type": "assistant", "message": {"id": "m1", "model": OPUS, "content": [], "usage": bare},
+                    **extra}
+
+        log.push(dict(m1(uuid=a[0], effort="low"), message={"id": "m1", "model": OPUS, "content": [],
+                                                            "usage": use(out=5)}))   # a seen uuid: skipped
+        log.push(m1(effort="high"))                                                 # the first level
+        log.push(m1(effort="max"))                                                  # a later level: ignored
+        log.push({"type": "assistant", "effort": "max", "message": {"model": "<synthetic>", "content": []}})
+        log.push({"type": "user", "uuid": "shared", "message": {"role": "user", "content": "x"}})
+        log.push({"type": "assistant", "uuid": "shared", "effort": "low",          # uuid of a user record
+                  "message": {"id": "m9", "model": OPUS, "content": [], "usage": use(out=5)}})
+        log.push({"type": "assistant", "uuid": "nomid", "perTurnEffort": "low",     # no message id: the uuid
+                  "message": {"model": OPUS, "content": [], "usage": use(out=1)}})
+        path = log.write(self.root, name="s1")
+        self.assertEqual(report.call_fields(path), {"m1": ["high", False], "nomid": ["low", True]})
 
 
 class Context(Base):
@@ -187,6 +399,17 @@ class Privacy(Base):
         self.assertNotIn(str(self.root), text)
         self.assertIn(report.MCP, text)
         self.assertNotIn("mcp:", text)
+
+    def test_a_level_not_on_the_list_is_other_level(self):
+        log = Log(start(1, 13), "D:\\Work\\" + CANARY + " Project")
+        a = log.call("e1" + CANARY, text("x"), use(cw=100, out=5), log.user("go"))
+        mark(log, a, effort=CANARY)
+        log.write(self.root, folder="D--Work-" + CANARY, name=CANARY + "-0002")
+        out, _code = self.cli()
+        self.assertNotIn(CANARY.lower(), out.lower())
+        self.assertIn(report.OTHER_LEVEL, out)
+        out, _code = self.cli("--names")
+        self.assertIn("  {:<40}{:<14}".format(OPUS, CANARY), out)
 
     def test_names_shows_the_project_and_the_server(self):
         text, _code = self.cli("--names")
