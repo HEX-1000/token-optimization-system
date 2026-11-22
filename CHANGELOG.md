@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.26.0 (2026-11-22)
+
+- New: `python -m hive report` shows where the tokens of your Claude Code sessions went, by source, model and token kind. It reads Claude Code's session logs and writes nothing.
+- New: `python -m hive sense` keeps one row of numbers per session, `baseline` shows how steady your days are, and `replay bash-output-limit` estimates what cutting long command output would have saved. The estimate comes from your logs and no model call backs it.
+- The package also holds the code of a loop that tests one Claude Code setting on random days. It is being tested on the author's machine and is not released or documented yet.
+- Retrieval server: unchanged, still 0.25.2.
+
 ## 0.25.2 (2026-10-26)
 
 First public release.

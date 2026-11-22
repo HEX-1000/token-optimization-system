@@ -1,0 +1,22 @@
+name: Trial record
+description: Share the record of a finished hive trial, exactly as `python -m hive share` printed it.
+title: "[trial record] "
+labels: ["trial-record"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A record holds only numbers, fixed values, catalog ids, versions and the start week of the trial. It has no text, names, paths or dates finer than a week, and a check on this repository rejects any record that does.
+
+        Paste the record **exactly** as `python -m hive share` printed it, between the two lines of dashes, and nothing else. Do not edit it: an edited record fails the check.
+
+        Issues on this repository are public. Your GitHub user name is shown next to the record.
+
+  - type: textarea
+    id: record
+    attributes:
+      label: Record
+      description: The JSON printed by `python -m hive share`.
+      render: json
+    validations:
+      required: true

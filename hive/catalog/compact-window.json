@@ -1,0 +1,23 @@
+{
+  "id": "compact-window",
+  "version": 1,
+  "compartment": "agentic",
+  "kind": "setting",
+  "description": "Compact the conversation when the context passes a fixed window, instead of the window Claude Code picks for the model.",
+  "setting": {"path": ["autoCompactWindow"], "type": "integer"},
+  "params": {"window": [200000, 400000]},
+  "overridden_by": {
+    "settings_paths": [["autoCompactWindow"], ["env", "CLAUDE_CODE_AUTO_COMPACT_WINDOW"]],
+    "model_settings_key": "autoCompactWindow",
+    "environment": ["CLAUDE_CODE_AUTO_COMPACT_WINDOW"]
+  },
+  "randomization_unit": "day",
+  "replay": null,
+  "own_guard": "reread_after_compact",
+  "component": null,
+  "applied_check": {"metric": "max_context"},
+  "eligibility": {"metric": "s_window", "param": "window", "min": 0.30},
+  "min_active_days_per_arm": 10,
+  "max_calendar_days": 42,
+  "source": "Claude Code settings documentation (autoCompactWindow: any settings file, 100000 to 1000000 tokens, capped at the model's context window; CLAUDE_CODE_AUTO_COMPACT_WINDOW takes precedence; modelSettings can override per model), read 2026-11-12. Hive plan section 4."
+}

@@ -1,0 +1,30 @@
+name: hive
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: hive tests, ${{ matrix.os }}, Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      # Synthetic logs only; the data folder of every test is a temporary folder.
+      - name: Hive tests (sensor, guards, trial loop, verdict, replay, record validator, shipped records)
+        shell: bash
+        run: python -B -m unittest discover -s hive/tests -t . -v
+      - name: Command line help
+        shell: bash
+        run: python -B -m hive -h

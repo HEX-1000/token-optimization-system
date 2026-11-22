@@ -1,0 +1,42 @@
+name: trial record
+
+# Checks the record pasted into a "Trial record" issue with the validator of the hive package.
+# The issue body reaches the script only through an environment variable and is parsed as JSON;
+# it is never run or put into a command line. The job reads the repository and writes nothing.
+
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: contains(github.event.issue.labels.*.name, 'trial-record')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate the record in the issue
+        env:
+          BODY: ${{ github.event.issue.body }}
+        shell: python
+        run: |
+          import os, re, sys
+          sys.path.insert(0, os.getcwd())
+          from hive import record
+          body = os.environ.get("BODY", "")
+          blocks = re.findall(r"```(?:json)?[ \t]*\r?\n(.*?)\r?\n```", body, re.S)
+          if len(blocks) != 1:
+              print("::error title=trial record::expected exactly one JSON block, found %d" % len(blocks))
+              sys.exit(1)
+          problems = record.validate_bytes(blocks[0].strip().encode("utf-8"))
+          if problems:
+              print("::error title=trial record::the record does not pass the validator")
+              for p in problems:
+                  print(p)
+              sys.exit(1)
+          print("The record passes the validator.")

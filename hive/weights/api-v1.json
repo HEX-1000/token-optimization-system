@@ -1,0 +1,13 @@
+{
+  "id": "api-v1",
+  "unit": "USD per million tokens",
+  "kinds": "input: uncached input; w5m: 5-minute cache write; w1h: 1-hour cache write; read: cache read; output: output",
+  "source": "Anthropic API pricing page (platform.claude.com/docs/en/about-claude/pricing), fetched 2026-11-06; claude-fable-5-2 from the same page on 2026-11-12. Prices at speed standard and service tier standard. claude-haiku-5-5 at prompts up to 100,000 tokens.",
+  "models": {
+    "claude-opus-5-5": {"input": 4.0, "w5m": 5.0, "w1h": 8.0, "read": 0.20, "output": 20.0},
+    "claude-sonnet-5-5": {"input": 2.0, "w5m": 2.5, "w1h": 4.0, "read": 0.10, "output": 10.0},
+    "claude-opus-4-6": {"input": 5.0, "w5m": 6.25, "w1h": 10.0, "read": 0.50, "output": 25.0},
+    "claude-haiku-5-5": {"input": 0.10, "w5m": 0.125, "w1h": 0.20, "read": 0.01, "output": 0.50},
+    "claude-fable-5-2": {"input": 8.0, "w5m": 10.0, "w1h": 16.0, "read": 0.20, "output": 40.0}
+  }
+}

@@ -113,9 +113,11 @@ jobs:
               return $r.Text
           }
 
-          function Get-ChangelogVersion {
-              $m = Select-String -Path "CHANGELOG.md" -Pattern '^##\s+v?(\d+\.\d+\.\d+)' | Select-Object -First 1
-              if (-not $m) { Fail "changelog" "CHANGELOG.md has no version heading" }
+          # The server's own version (src\server_d2.py). It is not the repository version of CHANGELOG.md:
+          # since 0.26.0 the repository and the retrieval server have separate numbers.
+          function Get-ServerVersion {
+              $m = Select-String -Path "src\server_d2.py" -Pattern '^SERVER_VERSION = "(\d+\.\d+\.\d+)"' | Select-Object -First 1
+              if (-not $m) { Fail "server version" "src\server_d2.py has no SERVER_VERSION line" }
               return $m.Matches[0].Groups[1].Value
           }
           '@
@@ -158,7 +160,7 @@ jobs:
         shell: powershell
         run: |
           . (Join-Path $env:RUNNER_TEMP "tos smoke\helpers.ps1")
-          $version = Get-ChangelogVersion
+          $version = Get-ServerVersion
           $stats = Get-Stats
           Write-Host $stats
           if ($stats -notmatch [regex]::Escape("Token Optimization System v$version")) { Fail "stats version" "expected v$version in: $stats" }
