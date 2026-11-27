@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.26.2 (2026-11-28)
+
+- Fix: `scripts\connect-claude-desktop.ps1 -Undo` now removes the one entry `token-optimization-system` from Claude Desktop's config file and leaves the rest as it is. Before, it put back the newest backup of the whole file. After a second run of the script that backup already held the entry, so `-Undo` left it in place, and changes made to the config after the backup were lost.
+- The same script no longer replaces a backup that it made in the same second.
+- README: the result of a second check of real use. Under an instruction to use it, Claude Code called the retrieval server 3 times in 57 sessions. Work on the retrieval server is paused.
+- Retrieval server: unchanged, still 0.25.2. The hive package stays 0.1.0.
+
 ## 0.26.1 (2026-11-22)
 
 - `python -m hive report` has a table of thinking by model: thinking tokens written as output, the cost of re-reading them in later calls, and the total of both with its share of all cost. On the author's machine the total is 30.8% of the weighted cost; the output alone is 18.4%.

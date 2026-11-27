@@ -112,6 +112,8 @@ What this does not show: the notes are 39 small files and the questions were wri
 
 After the test, in two weeks of real work in this project's folder (2026-10-28 to 2026-11-10), Claude Code did not call the server on its own in any of 21 sessions; in normal sessions Claude Code shows MCP tools by name only until it searches for them, while the test runs had the tool descriptions loaded from the start.
 
+A second check ran from 2026-11-12 to 2026-11-26: this project's instructions told Claude Code to ask the server first when it did not know which file held a record. Claude Code then called the server 3 times in 57 sessions, all on one day. The count shows how often the server was used, not whether a call saved tokens. Work on the retrieval server is paused; it stays published as it is.
+
 ### Tools Claude gets
 
 | Tool | What it does |
@@ -189,7 +191,7 @@ Download the new version (or run `git pull` if you cloned it), quit Claude Deskt
 
 #### Uninstall
 
-1. Quit Claude Desktop and run `powershell -ExecutionPolicy Bypass -File scripts\connect-claude-desktop.ps1 -Undo`.
+1. Quit Claude Desktop and run `powershell -ExecutionPolicy Bypass -File scripts\connect-claude-desktop.ps1 -Undo`. It makes a backup of the config file and removes the one entry; the rest of the config stays as it is.
 2. Delete `%USERPROFILE%\Programs\TokenOptimizationSystem`. This also deletes the index.
 
 #### Troubleshooting
@@ -240,7 +242,7 @@ The first part of that is in the code: a loop that switches one Claude Code sett
 
 ## Versions
 
-Current: **0.26.1**, which adds thinking and effort levels to the measurement report (`python -m hive report`). The retrieval server is 0.25.2 (retrieval V0.25.0 with compact output) and has not changed. See [CHANGELOG.md](CHANGELOG.md).
+Current: **0.26.2**, which fixes `-Undo` in the script that connects Claude Desktop. The measurement report (`python -m hive report`) is as in 0.26.1. The retrieval server is 0.25.2 (retrieval V0.25.0 with compact output) and has not changed. See [CHANGELOG.md](CHANGELOG.md).
 
 Development and experiments happen in a separate repository. Changes reach this one after they are measured on the evaluation suite. Bug reports are welcome as [issues](../../issues), questions and ideas in [Discussions](../../discussions). Both are public, so do not paste document text, file names or folder paths there. If you tried the server on your own files, the "Report a result" form asks for numbers and a general description. It never asks for document text, file names or your questions.
 

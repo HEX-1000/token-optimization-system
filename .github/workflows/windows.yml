@@ -204,6 +204,12 @@ jobs:
           Write-Host $c.Text
           if ($c.Code -ne 0) { Fail "config after connect" "$($c.Text)`n$(Get-Content -Raw $cfg)" }
 
+          # A second run must not stop -Undo from removing the entry: after it, the newest backup holds the entry.
+          $r = Invoke-Script @("scripts\connect-claude-desktop.ps1", "-Config", $cfg, "-InstallDir", $install)
+          if ($r.Code -ne 0) { Fail "second connect exit code $($r.Code)" $r.Text }
+          $c = Invoke-Python @($checkScript, $cfg, $originalFile, "yes", $venvPy)
+          if ($c.Code -ne 0) { Fail "config after second connect" "$($c.Text)`n$(Get-Content -Raw $cfg)" }
+
           $u = Invoke-Script @("scripts\connect-claude-desktop.ps1", "-Undo", "-Config", $cfg, "-InstallDir", $install)
           if ($u.Code -ne 0) { Fail "undo exit code $($u.Code)" $u.Text }
           $c = Invoke-Python @($checkScript, $cfg, $originalFile, "no", $venvPy)
